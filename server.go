@@ -17,7 +17,8 @@ import (
 // It also provides a Run function to start an HTTP server with graceful shutdown.
 // The server is stopped gracefully when the context is cancelled or a shutdown signal is received.
 type Server struct {
-	httpServer *http.Server
+	httpServer      *http.Server
+	shutdownTimeout time.Duration
 }
 
 // New creates a new instance of the new HTTP server
@@ -38,6 +39,7 @@ func New(addr string, handler http.Handler, opt ...serverOption) *Server {
 			IdleTimeout:    15 * time.Second,
 			MaxHeaderBytes: 1 << 20, // 1 MB
 		},
+		shutdownTimeout: 5 * time.Second,
 	}
 
 	// Apply options
@@ -69,7 +71,7 @@ func (s *Server) Start(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-signalChan():
-			return s.Stop(5 * time.Second)
+			return s.Stop(s.shutdownTimeout)
 		}
 	})
 

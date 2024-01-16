@@ -87,3 +87,11 @@ func WithErrorLog(l *log.Logger) serverOption {
 		srv.httpServer.ErrorLog = l
 	}
 }
+
+// WithGracefulShutdown sets the graceful shutdown timeout.
+// If zero, the default timeout of 5 seconds is used.
+func WithGracefulShutdown(d time.Duration) serverOption {
+	return func(srv *Server) {
+		srv.shutdownTimeout = d
+	}
+}

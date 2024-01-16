@@ -67,7 +67,7 @@ if err := srv.Start(ctx); err != nil {
 }
 ```
 
-Using with `errgroup`:
+### Using with `errgroup`:
 
 ```go
 package main
@@ -103,6 +103,39 @@ func main() {
 ```
 
 The code above will start two HTTP servers on ports 8080 and 8081. Both servers will be gracefully shut down when the context is canceled.
+
+### With options:
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "github.com/dmitrymomot/httpserver"
+)
+
+func main() {
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
+
+    r := http.NewServeMux()
+    r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte("Hello, World!"))
+    })
+
+    srv := httpserver.NewServer(
+        ":8080", r, 
+        httpserver.WithGracefulShutdown(10*time.Second),
+        httpserver.WithReadTimeout(5*time.Second),
+    )
+    if err := srv.Start(ctx); err != nil {
+        panic(err)
+    }
+}
+```
+
+The code above will start an HTTP server on port 8080 with a graceful shutdown timeout of 10 seconds and a read timeout of 5 seconds.
 
 ## Contributing
 
