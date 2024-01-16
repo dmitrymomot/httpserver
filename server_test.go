@@ -27,7 +27,7 @@ func TestServer(t *testing.T) {
 	}()
 
 	// Wait for the server to start
-	// time.Sleep(1 * time.Second)
+	time.Sleep(500 * time.Millisecond)
 
 	// Perform an HTTP request to the server
 	resp, err := http.Get(fmt.Sprintf("http://%s", listenAddr))
