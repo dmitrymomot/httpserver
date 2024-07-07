@@ -137,6 +137,39 @@ func main() {
 
 The code above will start an HTTP server on port 8080 with a graceful shutdown timeout of 10 seconds and a read timeout of 5 seconds.
 
+### Serve static files:
+
+The code below will serve static files from the `./web/static` directory under the `/static` URL prefix with a cache TTL of 10 minutes.
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "github.com/dmitrymomot/httpserver"
+    "time"
+)
+
+var (
+    staticURLPrefix = "/static"
+    staticDir       = "./web/static"
+    staticCacheTTL  = 10 * time.Minute
+)
+
+func main() {
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+    defer cancel()
+
+    r := http.NewServeMux()
+	r.HandleFunc(staticURLPrefix+"/*", httpserver.StaticHandler(staticURLPrefix, http.Dir(staticDir), staticCacheTTL))
+
+    if err := httpserver.Run(ctx, ":8080", r); err != nil {
+        panic(err)
+    }
+}
+```
+
 ## Contributing
 
 Contributions to the `httpserver` package are welcome! Here are some ways you can contribute:
