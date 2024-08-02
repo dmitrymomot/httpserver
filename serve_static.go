@@ -27,14 +27,13 @@ func StaticHandler(publicPath string, root http.FileSystem, cacheTTL time.Durati
 // It uses the embed.FS type to serve files from the specified directory.
 //
 // Parameters:
-// - publicPath: The URL path prefix from which the static files will be served.
 // - fs: The embed.FS representing the embedded file system.
 // - cacheTTL: The duration for which the client should cache the served files.
 //
 // Returns:
 // An http.HandlerFunc that serves static files with optional caching.
-func EmbeddedStaticHandler(publicPath string, fs embed.FS, cacheTTL time.Duration) http.HandlerFunc {
-	return serveStaticHandlerFunc(publicPath, http.FS(fs), cacheTTL)
+func EmbeddedStaticHandler(fs embed.FS, cacheTTL time.Duration) http.HandlerFunc {
+	return serveStaticHandlerFunc("", http.FS(fs), cacheTTL)
 }
 
 // serveFile serves a single file through HTTP with optional caching.
