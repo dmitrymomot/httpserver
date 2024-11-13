@@ -3,7 +3,6 @@ package httpserver
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -22,7 +21,6 @@ type Server struct {
 	httpServer      *http.Server
 	shutdownTimeout time.Duration
 	log             Logger
-	errCh           chan error
 }
 
 // Logger is an interface that defines the logging methods used by the server.
@@ -41,7 +39,14 @@ type Logger interface {
 // The opt parameter is a variadic list of server options.
 // The server options are applied in order, so the last option overrides the previous ones.
 // The server options are applied before the server is started.
-func New(addr string, handler http.Handler, opt ...serverOption) *Server {
+func New(addr string, handler http.Handler, opt ...serverOption) (*Server, error) {
+	if addr == "" {
+		return nil, ErrEmptyAddress
+	}
+	if handler == nil {
+		return nil, ErrNilHandler
+	}
+
 	s := &Server{
 		httpServer: &http.Server{
 			Addr:           addr,
@@ -53,7 +58,6 @@ func New(addr string, handler http.Handler, opt ...serverOption) *Server {
 		},
 		shutdownTimeout: 5 * time.Second,
 		log:             slog.Default().With(slog.String("component", "httpserver")),
-		errCh:           make(chan error, 1), // Initialize error channel
 	}
 
 	// Apply options
@@ -61,7 +65,7 @@ func New(addr string, handler http.Handler, opt ...serverOption) *Server {
 		o(s)
 	}
 
-	return s
+	return s, nil
 }
 
 // Start starts the server and listens for incoming requests.
@@ -85,7 +89,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// Start the server in a new goroutine within the errgroup
 	g.Go(func() error {
 		if err := s.httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("HTTP server ListenAndServe: %w", err)
+			return errors.Join(ErrServerStart, err)
 		}
 		return nil
 	})
@@ -116,7 +120,7 @@ func (s *Server) Start(ctx context.Context) error {
 // It uses the provided timeout to gracefully shutdown the underlying HTTP server.
 // If the timeout is reached before the server is fully stopped, an error is returned.
 func (s *Server) Stop(ctx context.Context, timeout time.Duration) error {
-	s.log.InfoContext(context.Background(), "stopping HTTP server", "timeout", timeout)
+	s.log.InfoContext(ctx, "stopping HTTP server", "timeout", timeout)
 
 	// Create a new context for shutdown with timeout
 	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -127,9 +131,10 @@ func (s *Server) Stop(ctx context.Context, timeout time.Duration) error {
 
 	// Shutdown the HTTP server
 	g.Go(func() error {
-		err := s.httpServer.Shutdown(shutdownCtx)
-		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
-			return fmt.Errorf("server shutdown error: %w", err)
+		if err := s.httpServer.Shutdown(shutdownCtx); err != nil &&
+			!errors.Is(err, context.Canceled) &&
+			!errors.Is(err, http.ErrServerClosed) {
+			return errors.Join(ErrServerStop, err)
 		}
 		return nil
 	})
@@ -153,7 +158,7 @@ func (s *Server) Close(ctx context.Context) error {
 
 	if err := s.httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		s.log.ErrorContext(ctx, "error during force close", "error", err)
-		return fmt.Errorf("server force close error: %w", err)
+		return errors.Join(ErrServerForceClose, err)
 	}
 	return nil
 }
@@ -171,6 +176,9 @@ func signalChan() <-chan os.Signal {
 // The addr parameter specifies the address to listen on, e.g., ":8080" for all interfaces on port 8080.
 // The handler parameter is an http.Handler that defines the behavior of the server.
 func Run(ctx context.Context, addr string, handler http.Handler) error {
-	server := New(addr, handler)
+	server, err := New(addr, handler)
+	if err != nil {
+		return err
+	}
 	return server.Start(ctx)
 }
