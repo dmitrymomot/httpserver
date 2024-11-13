@@ -9,27 +9,30 @@
 [![GolangCI Lint](https://github.com/dmitrymomot/httpserver/actions/workflows/golangci-lint.yml/badge.svg)](https://github.com/dmitrymomot/httpserver/actions/workflows/golangci-lint.yml)
 [![Go Report Card](https://goreportcard.com/badge/github.com/dmitrymomot/httpserver)](https://goreportcard.com/report/github.com/dmitrymomot/httpserver)
 
-The `httpserver` package in Go offers a simple and efficient solution for creating, running, and gracefully shutting down HTTP servers. It supports context cancellation and concurrent execution, making it suitable for a wide range of web applications.
+The `httpserver` package provides a robust and feature-rich HTTP server implementation in Go, offering graceful shutdown, static file serving, and extensive configuration options. It's designed to be both simple to use and powerful enough for production environments.
 
 ## Features
 
-- Easy to set up and start HTTP servers
-- Graceful shutdown handling
-- Context cancellation support
-- Concurrency management with `errgroup`
-- Lightweight and flexible design
+-   Easy server setup and configuration
+-   Graceful shutdown with configurable timeout
+-   Context-based cancellation
+-   Static file serving with caching support
+-   Embedded filesystem support
+-   Comprehensive server options
+-   Structured logging support
+-   TLS configuration
+-   Concurrent execution with `errgroup`
+-   Production-ready defaults
 
 ## Installation
-
-To install the `httpserver` package, use the following command:
 
 ```bash
 go get github.com/dmitrymomot/httpserver
 ```
 
-## Usage
+## Basic Usage
 
-Here's a basic example of how to use the `httpserver` package:
+### Simple HTTP Server
 
 ```go
 package main
@@ -38,108 +41,61 @@ import (
     "context"
     "net/http"
     "github.com/dmitrymomot/httpserver"
+)
+
+func main() {
+    // Create a new router
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+        w.Write([]byte("Hello, World!"))
+    })
+
+    // Start the server with default configuration
+    if err := httpserver.Run(context.Background(), ":8080", mux); err != nil {
+        panic(err)
+    }
+}
+```
+
+### Advanced Server Configuration
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
     "time"
-)
-
-func main() {
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-    defer cancel()
-
-    r := http.NewServeMux()
-    r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("Hello, World!"))
-    })
-
-    if err := httpserver.Run(ctx, ":8080", r); err != nil {
-        panic(err)
-    }
-}
-```
-
-This will start an HTTP server on port 8080 and respond with "Hello, World!" to `GET /` request. The server will be gracefully shut down after 10 minutes.
-
-The `httpserver.Run` function is a shortcut for creating a new HTTP server and starting it. It's equivalent to the following code:
-
-```go
-srv := httpserver.NewServer(addr, handler)
-if err := srv.Start(ctx); err != nil {
-    panic(err)
-}
-```
-
-### Using with `errgroup`:
-
-```go
-package main
-
-import (
-    "context"
-    "net/http"
-    "github.com/dmitrymomot/httpserver"
-    "golang.org/x/sync/errgroup"
-)
-
-func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    r := http.NewServeMux()
-    r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        w.Write([]byte("Hello, World!"))
-    })
-
-    g, ctx := errgroup.WithContext(ctx)
-    g.Go(func() error {
-        return httpserver.Run(ctx, ":8080", r)
-    })
-    g.Go(func() error {
-        return httpserver.Run(ctx, ":8081", r)
-    })
-
-    if err := g.Wait(); err != nil {
-        panic(err)
-    }
-}
-```
-
-The code above will start two HTTP servers on ports 8080 and 8081. Both servers will be gracefully shut down when the context is canceled.
-
-### With options:
-
-```go
-package main
-
-import (
-    "context"
-    "net/http"
     "github.com/dmitrymomot/httpserver"
 )
 
 func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
-
-    r := http.NewServeMux()
-    r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+    mux := http.NewServeMux()
+    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         w.Write([]byte("Hello, World!"))
     })
 
-    srv := httpserver.NewServer(
-        ":8080", r, 
-        httpserver.WithGracefulShutdown(10*time.Second),
+    // Create a new server with custom options
+    server, err := httpserver.New(":8080", mux,
         httpserver.WithReadTimeout(5*time.Second),
+        httpserver.WithWriteTimeout(10*time.Second),
+        httpserver.WithIdleTimeout(15*time.Second),
+        httpserver.WithGracefulShutdown(30*time.Second),
+        httpserver.WithMaxHeaderBytes(1<<20), // 1MB
     )
-    if err := srv.Start(ctx); err != nil {
+    if err != nil {
+        panic(err)
+    }
+
+    // Start the server with context
+    ctx := context.Background()
+    if err := server.Start(ctx); err != nil {
         panic(err)
     }
 }
 ```
 
-The code above will start an HTTP server on port 8080 with a graceful shutdown timeout of 10 seconds and a read timeout of 5 seconds.
-
-### Serve static files:
-
-The code below will serve static files from the `./web/static` directory under the `/static` URL prefix with a cache TTL of 10 minutes.
+### Serving Static Files
 
 ```go
 package main
@@ -147,39 +103,78 @@ package main
 import (
     "context"
     "net/http"
-    "github.com/dmitrymomot/httpserver"
     "time"
-)
-
-var (
-    staticURLPrefix = "/static"
-    staticDir       = "./web/static"
-    staticCacheTTL  = 10 * time.Minute
+    "github.com/dmitrymomot/httpserver"
 )
 
 func main() {
-    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-    defer cancel()
+    mux := http.NewServeMux()
 
-    r := http.NewServeMux()
-	r.HandleFunc(staticURLPrefix+"/*", httpserver.StaticHandler(staticURLPrefix, http.Dir(staticDir), staticCacheTTL))
+    // Serve files from physical directory
+    mux.HandleFunc("/static/", httpserver.StaticHandler(
+        "/static",
+        http.Dir("./static"),
+        10*time.Minute, // Cache TTL
+    ))
 
-    if err := httpserver.Run(ctx, ":8080", r); err != nil {
+    // Serve files from embedded filesystem
+    //go:embed static/*
+    var embedFS embed.FS
+    mux.HandleFunc("/assets/", httpserver.EmbeddedStaticHandler(
+        embedFS,
+        24*time.Hour, // Cache TTL
+    ))
+
+    if err := httpserver.Run(context.Background(), ":8080", mux); err != nil {
         panic(err)
     }
 }
 ```
+
+### Graceful Shutdown
+
+```go
+package main
+
+import (
+    "context"
+    "net/http"
+    "time"
+    "github.com/dmitrymomot/httpserver"
+)
+
+func main() {
+    // Create context with timeout
+    ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+    defer cancel()
+
+    mux := http.NewServeMux()
+    server, _ := httpserver.New(":8080", mux)
+
+    // Server will shut down gracefully when context is canceled
+    if err := server.Start(ctx); err != nil {
+        panic(err)
+    }
+}
+```
+
+## Server Options
+
+The package provides numerous options to configure the server:
+
+-   `WithPreconfiguredServer` - Use a pre-configured http.Server
+-   `WithReadTimeout` - Set maximum duration for reading requests
+-   `WithWriteTimeout` - Set maximum duration for writing responses
+-   `WithIdleTimeout` - Set maximum time to wait for the next request
+-   `WithMaxHeaderBytes` - Set maximum size of request headers
+-   `WithTLSConfig` - Configure TLS settings
+-   `WithGracefulShutdown` - Set graceful shutdown timeout
+-   `WithLogger` - Set custom logger
 
 ## Contributing
 
-Contributions to the `httpserver` package are welcome! Here are some ways you can contribute:
-
-- Reporting bugs
-- Additional tests cases
-- Suggesting enhancements
-- Submitting pull requests
-- Sharing the love by telling others about this project
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-This project is licensed under the [Apache 2.0](LICENSE) - see the `LICENSE` file for details.
+This project is licensed under the [Apache 2.0](LICENSE) - see the LICENSE file for details.
