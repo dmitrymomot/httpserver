@@ -2,6 +2,7 @@ package httpserver_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"testing"
@@ -12,36 +13,48 @@ import (
 )
 
 func TestServer(t *testing.T) {
-	listenAddr := "localhost:9999"
+    listenAddr := "localhost:9999"
 
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprintln(w, "Hello, World!") })
-	server := httpserver.New(listenAddr, handler)
+    handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        fmt.Fprintln(w, "Hello, World!")
+    })
+    server := httpserver.New(listenAddr, handler)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+    // Create a context with cancel for server control
+    ctx, cancel := context.WithCancel(context.Background())
+    defer cancel()
 
-	// Run the server in a separate goroutine
-	go func() {
-		if err := server.Start(ctx); err != nil {
-			require.NoError(t, err, "Unexpected error in server start")
-		}
-	}()
+    // Channel to catch server errors
+    serverErr := make(chan error, 1)
 
-	// Wait for the server to start
-	time.Sleep(500 * time.Millisecond)
+    // Start the server in a goroutine
+    go func() {
+        serverErr <- server.Start(ctx)
+    }()
 
-	// Perform an HTTP request to the server
-	resp, err := http.Get(fmt.Sprintf("http://%s", listenAddr))
-	require.NoError(t, err, "Unexpected error in GET request")
-	require.Equal(t, http.StatusOK, resp.StatusCode, "Unexpected status code")
+    // Wait for the server to start
+    time.Sleep(500 * time.Millisecond)
 
-	// Shutdown the server
-	require.NoError(t, server.Stop(ctx, 1*time.Second), "Unexpected error in server shutdown")
+    // Test server response
+    resp, err := http.Get(fmt.Sprintf("http://%s", listenAddr))
+    require.NoError(t, err, "Unexpected error in GET request")
+    require.Equal(t, http.StatusOK, resp.StatusCode, "Unexpected status code")
+    resp.Body.Close()
 
-	// Wait for the server to shut down
-	// time.Sleep(1 * time.Second)
+    // Initiate graceful shutdown
+    cancel()
 
-	// Perform an HTTP request to the server after it has shut down
-	_, err = http.Get(fmt.Sprintf("http://%s", listenAddr))
-	require.Error(t, err, "Expected error after server shutdown")
+    // Wait for server to shut down with timeout
+    shutdownTimeout := time.After(5 * time.Second)
+    select {
+    case err := <-serverErr:
+        require.True(t, err == nil || errors.Is(err, context.Canceled),
+            "Expected nil or context.Canceled error, got: %v", err)
+    case <-shutdownTimeout:
+        t.Fatal("Server shutdown timed out")
+    }
+
+    // Verify server is no longer accepting connections
+    _, err = http.Get(fmt.Sprintf("http://%s", listenAddr))
+    require.Error(t, err, "Expected error after server shutdown")
 }

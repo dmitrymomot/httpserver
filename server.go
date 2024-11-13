@@ -22,6 +22,7 @@ type Server struct {
 	httpServer      *http.Server
 	shutdownTimeout time.Duration
 	log             Logger
+	errCh           chan error
 }
 
 // Logger is an interface that defines the logging methods used by the server.
@@ -52,6 +53,7 @@ func New(addr string, handler http.Handler, opt ...serverOption) *Server {
 		},
 		shutdownTimeout: 5 * time.Second,
 		log:             slog.Default().With(slog.String("component", "httpserver")),
+		errCh:           make(chan error, 1), // Initialize error channel
 	}
 
 	// Apply options
@@ -74,6 +76,10 @@ func (s *Server) Start(ctx context.Context) error {
 		"idle_timeout", s.httpServer.IdleTimeout,
 	)
 
+	// Create a new context for shutdown
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	defer shutdownCancel()
+
 	g, _ := errgroup.WithContext(ctx)
 
 	// Start the server in a new goroutine within the errgroup
@@ -84,26 +90,26 @@ func (s *Server) Start(ctx context.Context) error {
 		return nil
 	})
 
-	// Handle shutdown signal in a new goroutine within the errgroup
+	// Handle shutdown signals
 	g.Go(func() error {
 		select {
 		case <-ctx.Done():
 			s.log.InfoContext(ctx, "context cancelled, initiating shutdown")
-			return ctx.Err()
+			return s.Stop(shutdownCtx, s.shutdownTimeout)
 		case sig := <-signalChan():
 			s.log.InfoContext(ctx, "received shutdown signal", "signal", sig.String())
-			return s.Stop(ctx, s.shutdownTimeout)
+			return s.Stop(shutdownCtx, s.shutdownTimeout)
 		}
 	})
 
-	// Wait for all goroutines in the errgroup to finish
-	err := g.Wait()
-	if err != nil {
+	// Wait for all goroutines to complete
+	if err := g.Wait(); err != nil && !errors.Is(err, context.Canceled) {
 		s.log.ErrorContext(ctx, "server stopped with error", "error", err)
-	} else {
-		s.log.InfoContext(ctx, "server stopped gracefully")
+		return err
 	}
-	return err
+
+	s.log.InfoContext(ctx, "server stopped gracefully")
+	return nil
 }
 
 // Stop stops the server gracefully with the given timeout.
@@ -111,11 +117,28 @@ func (s *Server) Start(ctx context.Context) error {
 // If the timeout is reached before the server is fully stopped, an error is returned.
 func (s *Server) Stop(ctx context.Context, timeout time.Duration) error {
 	s.log.InfoContext(context.Background(), "stopping HTTP server", "timeout", timeout)
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+
+	// Create a new context for shutdown with timeout
+	shutdownCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	if err := s.httpServer.Shutdown(ctx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+	// Create an error group for coordinated shutdown
+	g := new(errgroup.Group)
+
+	// Shutdown the HTTP server
+	g.Go(func() error {
+		err := s.httpServer.Shutdown(shutdownCtx)
+		if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("server shutdown error: %w", err)
+		}
+		return nil
+	})
+
+	// Wait for shutdown to complete or timeout
+	if err := g.Wait(); err != nil {
 		s.log.ErrorContext(ctx, "error during server shutdown", "error", err)
+		// Force close if graceful shutdown fails
+		_ = s.Close(ctx)
 		return err
 	}
 
@@ -126,11 +149,11 @@ func (s *Server) Stop(ctx context.Context, timeout time.Duration) error {
 // Close stops the server immediately without waiting for active connections to finish.
 // It returns an error if the server fails to stop.
 func (s *Server) Close(ctx context.Context) error {
-	s.log.InfoContext(context.Background(), "force closing HTTP server")
+	s.log.InfoContext(ctx, "force closing HTTP server")
 
 	if err := s.httpServer.Close(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		s.log.ErrorContext(context.Background(), "error during force close", "error", err)
-		return err
+		s.log.ErrorContext(ctx, "error during force close", "error", err)
+		return fmt.Errorf("server force close error: %w", err)
 	}
 	return nil
 }
