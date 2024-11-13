@@ -39,7 +39,7 @@ func TestServer(t *testing.T) {
 	require.NoError(t, server.Stop(ctx, 1*time.Second), "Unexpected error in server shutdown")
 
 	// Wait for the server to shut down
-	time.Sleep(1 * time.Second)
+	// time.Sleep(1 * time.Second)
 
 	// Perform an HTTP request to the server after it has shut down
 	_, err = http.Get(fmt.Sprintf("http://%s", listenAddr))
