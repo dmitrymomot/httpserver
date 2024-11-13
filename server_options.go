@@ -95,3 +95,12 @@ func WithGracefulShutdown(d time.Duration) serverOption {
 		srv.shutdownTimeout = d
 	}
 }
+
+// WithLogger sets the logger for the server.
+// If nil, the log package's standard logger is used.
+// If you want to use a structured logger, consider using the slog package.
+func WithLogger(l Logger) serverOption {
+	return func(srv *Server) {
+		srv.log = l
+	}
+}
