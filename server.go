@@ -167,7 +167,7 @@ func (s *Server) Close(ctx context.Context) error {
 // signalChan sets up a channel to listen for OS signals for shutdown
 func signalChan() <-chan os.Signal {
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, os.Kill)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	return stop
 }
 

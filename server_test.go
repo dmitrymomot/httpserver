@@ -16,7 +16,7 @@ func TestServer(t *testing.T) {
 	listenAddr := "localhost:9999"
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "Hello, World!")
+		_, _ = fmt.Fprintln(w, "Hello, World!")
 	})
 	server, err := httpserver.New(listenAddr, handler)
 	require.NoError(t, err, "Unexpected error creating server")
