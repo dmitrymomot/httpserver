@@ -84,7 +84,8 @@ func (s *Server) Start(ctx context.Context) error {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
-	g, _ := errgroup.WithContext(ctx)
+	// creates ctx which will be canceled on first failed goroutine
+	g, ctx := errgroup.WithContext(ctx)
 
 	// Start the server in a new goroutine within the errgroup
 	g.Go(func() error {
