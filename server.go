@@ -84,7 +84,8 @@ func (s *Server) Start(ctx context.Context) error {
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	defer shutdownCancel()
 
-	g, _ := errgroup.WithContext(ctx)
+	// creates ctx which will be canceled on first failed goroutine
+	g, ctx := errgroup.WithContext(ctx)
 
 	// Start the server in a new goroutine within the errgroup
 	g.Go(func() error {
@@ -166,7 +167,7 @@ func (s *Server) Close(ctx context.Context) error {
 // signalChan sets up a channel to listen for OS signals for shutdown
 func signalChan() <-chan os.Signal {
 	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, os.Kill)
 	return stop
 }
 
